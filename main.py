@@ -66,6 +66,8 @@ class GameApp:
         # Инициализация play_button_rect здесь
         self.play_button_rect = pygame.Rect(WIDTH // 2 - 75, HEIGHT // 2, 150, 50)
 
+        self.waiting_start_time = None  # Время начала ожидания второго игрока
+
     def prepare(self):
         while self.user is None:
             fetched_user = self.http_client.get_user(user_id)
@@ -95,6 +97,11 @@ class GameApp:
         self.player = next((user for user in players if user.user_id == self.user.user_id), None) if len(players) == 2 else None
         self.enemy = next((user for user in players if user.user_id != self.user.user_id), None) if len(players) == 2 else None
         self.players = players
+
+        # Если переходим из состояния ожидания в другое, сбрасываем таймер ожидания
+        if self.current_state == State.GAME_WAITING and current_state != State.GAME_WAITING:
+            self.waiting_start_time = None
+
         self.current_state = current_state
 
     def check_game_events(self, events):
@@ -110,6 +117,8 @@ class GameApp:
                     self.http_client.make_move(self.user.user_id, self.game.game_id, row, col, self.player.sign)
 
     def reset_game(self):
+        if self.game is not None and self.user is not None:
+            self.http_client.leave_game(self.user.user_id, self.game.game_id)
         self.game = None
         self.players = []
         self.moves = []
@@ -118,6 +127,7 @@ class GameApp:
         self.player = None
         self.enemy = None
         self.current_state = State.MENU
+        self.waiting_start_time = None  # Сброс таймера ожидания при перезапуске игры
 
     def check_events(self):
         events = pygame.event.get()
@@ -136,12 +146,18 @@ class GameApp:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self.reset_game()
+        if self.current_state == State.GAME_WAITING:
+            for event in events:
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        self.reset_game()
 
     def check_button_events(self):
         mouse_pos = pygame.mouse.get_pos()
         mouse_click = pygame.mouse.get_pressed()
         if self.play_button_rect.collidepoint(mouse_pos) and mouse_click[0]:
             self.current_state = State.GAME_WAITING
+            self.waiting_start_time = time.time()  # Фиксируем время начала ожидания
 
     def draw_menu(self):
         font = pygame.font.SysFont("Arial", 36, True)
@@ -205,6 +221,16 @@ class GameApp:
         font = pygame.font.SysFont("Arial", FONT_SIZE, True)
         text = font.render("Ожидание второго игрока...", True, WHITE)
         self.screen.blit(text, text.get_rect(center=(WIDTH // 2, HEIGHT // 2)))
+
+        if self.waiting_start_time is not None:
+            elapsed_time = int(time.time() - self.waiting_start_time)
+            minutes = elapsed_time // 60
+            seconds = elapsed_time % 60
+            # Форматируем время как MM:SS с ведущими нулями
+            time_text = f"{minutes:02d}:{seconds:02d}"
+            time_render = font.render(time_text, True, WHITE)
+            # Расположим таймер под основным текстом
+            self.screen.blit(time_render, time_render.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 40)))
 
     def check_can_make_move(self):
         can_make_move = True
